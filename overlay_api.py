@@ -1,55 +1,53 @@
-from flask import Flask, request, send_file, jsonify
+    from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "Overlay API is live 🚀"}), 200
-
-@app.route("/overlay", methods=["POST"])
+@app.route("/", methods=["POST"])
 def overlay():
-    data = request.get_json()
-
-    image_url = data.get("image_url")
-    logo_url = data.get("logo_url")
-    text = data.get("text", "")
-
-    if not image_url or not logo_url:
-        return jsonify({"error": "Missing image_url or logo_url"}), 400
-
     try:
-        # Download base image and logo
-        image = Image.open(BytesIO(requests.get(image_url).content))
+        data = request.get_json()
 
-        logo_response = requests.get(logo_url)
+        image_url = data.get("image_url")
+        logo_url = data.get("logo_url")
+        overlay_text = data.get("text", "SeguraInvendors")
 
+        if not image_url or not logo_url:
+            return jsonify({"error": "Missing 'image_url' or 'logo_url'"}), 400
+
+        # Download main image
+        image_response = requests.get(image_url)
         image = Image.open(BytesIO(image_response.content)).convert("RGBA")
+
+        # Download logo
+        logo_response = requests.get(logo_url)
         logo = Image.open(BytesIO(logo_response.content)).convert("RGBA")
 
-        # Resize logo
-        logo = logo.resize((100, 100))
+        # Resize logo to fit top-right (adjust size as needed)
+        logo_size = (100, 100)
+        logo = logo.resize(logo_size)
 
-        # Paste logo at bottom-right corner
-        image.paste(logo, (image.width - 110, image.height - 110), logo)
+        # Paste logo at top-right corner
+        image.paste(logo, (image.width - logo_size[0] - 10, 10), logo)
 
-        # Add white text at bottom-left
+        # Draw text at bottom-left
         draw = ImageDraw.Draw(image)
         font = ImageFont.load_default()
-        draw.text((10, image.height - 30), text, fill="white", font=font)
+        text_position = (10, image.height - 30)
+        draw.text(text_position, overlay_text, font=font, fill="white")
 
-        # Output image
-        output = BytesIO()
-        image.save(output, format="PNG")
-        output.seek(0)
-        return send_file(output, mimetype="image/png")
+        # Save final image to a buffer (you can later return or save it)
+        output_buffer = BytesIO()
+        image.save(output_buffer, format="PNG")
+        output_buffer.seek(0)
+
+        # Just respond with success (you can change to return the image if needed)
+        return jsonify({"status": "success"}), 200
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
