@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import requests
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance, ImageOps, ImageChops, ImageStat
 
 app = Flask(__name__)
 
@@ -46,7 +47,7 @@ def overlay_logo_and_text():
         logo_width = int(base_image.width * 0.1)
         logo_ratio = logo_width / logo_image.width
         logo_height = int(logo_image.height * logo_ratio)
-        logo_image = logo_image.resize((logo_width, logo_height), Image.ANTIALIAS)
+        logo_image = logo_image.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
 
         # Paste logo (top-left corner with 20px padding)
         base_image.paste(logo_image, (20, 20), logo_image)
