@@ -1,53 +1,71 @@
-    from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
-import requests
 from io import BytesIO
+import requests
 
 app = Flask(__name__)
 
-@app.route("/", methods=["POST"])
-def overlay():
+@app.route('/', methods=['POST'])
+def overlay_logo_and_text():
     try:
-        data = request.get_json()
+        data = request.json
+        image_url = data.get('image_url')
+        logo_url = data.get('logo_url')
+        overlay_text = data.get('text')
 
-        image_url = data.get("image_url")
-        logo_url = data.get("logo_url")
-        overlay_text = data.get("text", "SeguraInvendors")
-
-        if not image_url or not logo_url:
-            return jsonify({"error": "Missing 'image_url' or 'logo_url'"}), 400
+        # Validate inputs
+        if not image_url or not logo_url or not overlay_text:
+            return jsonify({'error': 'Missing image_url, logo_url or text'}), 400
 
         # Download main image
         image_response = requests.get(image_url)
-        image = Image.open(BytesIO(image_response.content)).convert("RGBA")
+        if not image_response.ok:
+            return jsonify({'error': 'Failed to download main image'}), 400
+
+        try:
+            base_image = Image.open(BytesIO(image_response.content)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open base image")
+            print("Headers:", image_response.headers)
+            print("Content (first 200 bytes):", image_response.content[:200])
+            return jsonify({'error': 'Main image could not be processed'}), 500
 
         # Download logo
         logo_response = requests.get(logo_url)
-        logo = Image.open(BytesIO(logo_response.content)).convert("RGBA")
+        if not logo_response.ok:
+            return jsonify({'error': 'Failed to download logo image'}), 400
 
-        # Resize logo to fit top-right (adjust size as needed)
+        try:
+            logo_image = Image.open(BytesIO(logo_response.content)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open logo image")
+            print("Headers:", logo_response.headers)
+            print("Content (first 200 bytes):", logo_response.content[:200])
+            return jsonify({'error': 'Logo image could not be processed'}), 500
+
+        # Resize logo
         logo_size = (100, 100)
-        logo = logo.resize(logo_size)
+        logo_image.thumbnail(logo_size)
 
-        # Paste logo at top-right corner
-        image.paste(logo, (image.width - logo_size[0] - 10, 10), logo)
+        # Paste logo (top-left corner)
+        base_image.paste(logo_image, (10, 10), logo_image)
 
-        # Draw text at bottom-left
-        draw = ImageDraw.Draw(image)
+        # Add text (bottom-right)
+        draw = ImageDraw.Draw(base_image)
         font = ImageFont.load_default()
-        text_position = (10, image.height - 30)
-        draw.text(text_position, overlay_text, font=font, fill="white")
+        text_position = (base_image.width - 10 - len(overlay_text)*6, base_image.height - 20)
+        draw.text(text_position, overlay_text, font=font, fill=(255, 255, 255, 255))
 
-        # Save final image to a buffer (you can later return or save it)
-        output_buffer = BytesIO()
-        image.save(output_buffer, format="PNG")
-        output_buffer.seek(0)
+        # Save to memory
+        output = BytesIO()
+        base_image.save(output, format='PNG')
+        output.seek(0)
 
-        # Just respond with success (you can change to return the image if needed)
-        return jsonify({"status": "success"}), 200
+        return app.response_class(output.getvalue(), mimetype='image/png')
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print("Unexpected Error:", str(e))
+        return jsonify({'error': 'Server error', 'details': str(e)}), 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    app.run(debug=False, host='0.0.0.0', port=10000)
