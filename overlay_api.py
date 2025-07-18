@@ -1,71 +1,84 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 import requests
-import io
-import os
-from zipfile import ZipFile
 
 app = Flask(__name__)
 
-# Load and resize logo once
-logo_url = "https://raw.githubusercontent.com/2100080051/logo/main/logo.png"
-logo_response = requests.get(logo_url)
-logo_image = Image.open(io.BytesIO(logo_response.content)).convert("RGBA")
-logo_image = logo_image.resize((100, 100))  # Larger size
+@app.route('/', methods=['POST'])
+def overlay_logo_and_text():
+    try:
+        data = request.json
+        image_url = data.get('image_url')
+        logo_url = data.get('logo_url')
+        overlay_text = data.get('text')
 
-# Text overlay content
-overlay_text = "Segura Invendors\nAI Agents & Automation"
+        # Validate inputs
+        if not image_url or not logo_url or not overlay_text:
+            return jsonify({'error': 'Missing image_url, logo_url or text'}), 400
 
-@app.route('/add-overlay', methods=['POST'])
-def add_overlay():
-    images_json = request.get_json()
-    image_files = []
+        # Download main image
+        image_response = requests.get(image_url)
+        if not image_response.ok:
+            return jsonify({'error': 'Failed to download main image'}), 400
 
-    for idx, entry in enumerate(images_json):
-        for item in entry['data']:
-            image_url = item['url']
-            try:
-                response = requests.get(image_url)
-                base_image = Image.open(io.BytesIO(response.content)).convert("RGBA")
+        try:
+            base_image = Image.open(BytesIO(image_response.content)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open base image")
+            print("Headers:", image_response.headers)
+            print("Content (first 200 bytes):", image_response.content[:200])
+            return jsonify({'error': 'Main image could not be processed'}), 500
 
-                # Create transparent overlay
-                overlay = Image.new("RGBA", base_image.size, (255, 255, 255, 0))
-                draw = ImageDraw.Draw(overlay)
+        # Download logo
+        logo_response = requests.get(logo_url)
+        if not logo_response.ok:
+            return jsonify({'error': 'Failed to download logo image'}), 400
 
-                # Paste logo
-                overlay.paste(logo_image, (20, 20), logo_image)
+        try:
+            logo_image = Image.open(BytesIO(logo_response.content)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open logo image")
+            print("Headers:", logo_response.headers)
+            print("Content (first 200 bytes):", logo_response.content[:200])
+            return jsonify({'error': 'Logo image could not be processed'}), 500
 
-                # Set font size dynamically based on image height
-                font_size = int(base_image.height * 0.035)
-                try:
-                    font = ImageFont.truetype("arial.ttf", font_size)
-                except:
-                    font = ImageFont.load_default()
+        # Resize logo dynamically (15% of base image width)
+        logo_width = int(base_image.width * 0.15)
+        logo_height = int(logo_image.height * (logo_width / logo_image.width))
+        logo_image = logo_image.resize((logo_width, logo_height), Image.ANTIALIAS)
 
-                # Set text position
-                text_position = (base_image.width - 450, base_image.height - 100)
-                draw.text(text_position, overlay_text, font=font, fill=(255, 255, 255, 255))
+        # Paste logo (top-left corner with padding)
+        padding = 20
+        base_image.paste(logo_image, (padding, padding), logo_image)
 
-                # Combine original image and overlay
-                combined = Image.alpha_composite(base_image, overlay)
+        # Add text (bottom-right corner)
+        draw = ImageDraw.Draw(base_image)
 
-                # Save combined image to BytesIO
-                buf = io.BytesIO()
-                combined.save(buf, format="PNG")
-                buf.seek(0)
-                image_files.append((f"image_{idx+1}.png", buf))
+        # Use truetype font with size proportional to image width
+        try:
+            font_size = max(20, int(base_image.width * 0.05))  # Increased from 0.035 to 0.05
+            font = ImageFont.truetype("arial.ttf", font_size)
+        except:
+            font = ImageFont.load_default()
 
-            except Exception as e:
-                print(f"Error processing image: {e}")
+        text_width, text_height = draw.textsize(overlay_text, font=font)
+        text_x = base_image.width - text_width - padding
+        text_y = base_image.height - text_height - padding
 
-    # Create a zip of all processed images
-    zip_buffer = io.BytesIO()
-    with ZipFile(zip_buffer, 'w') as zip_file:
-        for filename, img_bytes in image_files:
-            zip_file.writestr(filename, img_bytes.read())
-    zip_buffer.seek(0)
+        draw.text((text_x, text_y), overlay_text, font=font, fill=(255, 255, 255, 255))
 
-    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='branded_images.zip')
+        # Save to memory
+        output = BytesIO()
+        base_image.save(output, format='PNG')
+        output.seek(0)
+
+        return app.response_class(output.getvalue(), mimetype='image/png')
+
+    except Exception as e:
+        print("Unexpected Error:", str(e))
+        return jsonify({'error': 'Server error', 'details': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+
+    app.run(debug=False, host='0.0.0.0', port=10000)
