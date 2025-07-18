@@ -5,7 +5,13 @@ import requests
 
 app = Flask(__name__)
 
-@app.route('/', methods=['POST'])
+# Handle GET request (e.g., from browser visit)
+@app.route('/', methods=['GET'])
+def index():
+    return "Flask image overlay API is running. Use POST with image_url, logo_url, and text."
+
+# Handle POST request to overlay logo and text
+@app.route('/overlay', methods=['POST'])
 def overlay_logo_and_text():
     try:
         data = request.json
@@ -13,7 +19,6 @@ def overlay_logo_and_text():
         logo_url = data.get('logo_url')
         overlay_text = data.get('text')
 
-        # Validate inputs
         if not image_url or not logo_url or not overlay_text:
             return jsonify({'error': 'Missing image_url, logo_url or text'}), 400
 
@@ -25,9 +30,6 @@ def overlay_logo_and_text():
         try:
             base_image = Image.open(BytesIO(image_response.content)).convert("RGBA")
         except Exception as e:
-            print("Failed to open base image")
-            print("Headers:", image_response.headers)
-            print("Content (first 200 bytes):", image_response.content[:200])
             return jsonify({'error': 'Main image could not be processed'}), 500
 
         # Download logo
@@ -38,25 +40,32 @@ def overlay_logo_and_text():
         try:
             logo_image = Image.open(BytesIO(logo_response.content)).convert("RGBA")
         except Exception as e:
-            print("Failed to open logo image")
-            print("Headers:", logo_response.headers)
-            print("Content (first 200 bytes):", logo_response.content[:200])
             return jsonify({'error': 'Logo image could not be processed'}), 500
 
-        # Resize logo
-        logo_size = (100, 100)
-        logo_image.thumbnail(logo_size)
+        # Resize logo to 10% of image width
+        logo_width = int(base_image.width * 0.1)
+        logo_ratio = logo_width / logo_image.width
+        logo_height = int(logo_image.height * logo_ratio)
+        logo_image = logo_image.resize((logo_width, logo_height), Image.ANTIALIAS)
 
-        # Paste logo (top-left corner)
-        base_image.paste(logo_image, (10, 10), logo_image)
+        # Paste logo (top-left corner with 20px padding)
+        base_image.paste(logo_image, (20, 20), logo_image)
 
-        # Add text (bottom-right)
+        # Draw text (bottom-right corner with custom size and alignment)
         draw = ImageDraw.Draw(base_image)
-        font = ImageFont.load_default()
-        text_position = (base_image.width - 10 - len(overlay_text)*6, base_image.height - 20)
+        font_size = int(base_image.height * 0.035)
+
+        try:
+            font = ImageFont.truetype("arial.ttf", font_size)
+        except:
+            font = ImageFont.load_default()
+
+        text_width, text_height = draw.textsize(overlay_text, font=font)
+        text_position = (base_image.width - text_width - 40, base_image.height - text_height - 40)
+
         draw.text(text_position, overlay_text, font=font, fill=(255, 255, 255, 255))
 
-        # Save to memory
+        # Save result in memory
         output = BytesIO()
         base_image.save(output, format='PNG')
         output.seek(0)
@@ -64,7 +73,6 @@ def overlay_logo_and_text():
         return app.response_class(output.getvalue(), mimetype='image/png')
 
     except Exception as e:
-        print("Unexpected Error:", str(e))
         return jsonify({'error': 'Server error', 'details': str(e)}), 500
 
 if __name__ == '__main__':
