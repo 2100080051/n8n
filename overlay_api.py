@@ -6,6 +6,7 @@ import requests
 app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
+
 def overlay_logo_and_text():
     try:
         data = request.json
