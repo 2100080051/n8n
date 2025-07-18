@@ -22,7 +22,8 @@ def overlay():
 
     try:
         # Download base image and logo
-        image_response = requests.get(image_url)
+        image = Image.open(BytesIO(requests.get(image_url).content))
+
         logo_response = requests.get(logo_url)
 
         image = Image.open(BytesIO(image_response.content)).convert("RGBA")
