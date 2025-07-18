@@ -6,7 +6,6 @@ import requests
 app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
-
 def overlay_logo_and_text():
     try:
         data = request.json
@@ -44,30 +43,31 @@ def overlay_logo_and_text():
             print("Content (first 200 bytes):", logo_response.content[:200])
             return jsonify({'error': 'Logo image could not be processed'}), 500
 
-        # Resize logo dynamically (10% of base image width)
+        # Resize logo to 10% of image width
         logo_width = int(base_image.width * 0.1)
-        logo_height = int(logo_image.height * (logo_width / logo_image.width))
+        logo_ratio = logo_width / logo_image.width
+        logo_height = int(logo_image.height * logo_ratio)
         logo_image = logo_image.resize((logo_width, logo_height), Image.ANTIALIAS)
 
         # Paste logo (top-left corner with padding)
-        padding = 20
-        base_image.paste(logo_image, (padding, padding), logo_image)
+        base_image.paste(logo_image, (20, 20), logo_image)
 
-        # Add text (bottom-right corner)
+        # Add text (bottom-right corner with padding)
         draw = ImageDraw.Draw(base_image)
+        font_size = int(base_image.width * 0.025)
 
-        # Use truetype font with size proportional to image width
+        # Use default if arial not available
         try:
-            font_size = max(20, int(base_image.width * 0.035))  # Min 20pt
             font = ImageFont.truetype("arial.ttf", font_size)
         except:
             font = ImageFont.load_default()
 
         text_width, text_height = draw.textsize(overlay_text, font=font)
-        text_x = base_image.width - text_width - padding
-        text_y = base_image.height - text_height - padding
-
-        draw.text((text_x, text_y), overlay_text, font=font, fill=(255, 255, 255, 255))
+        text_position = (
+            base_image.width - text_width - 20,
+            base_image.height - text_height - 20
+        )
+        draw.text(text_position, overlay_text, font=font, fill=(255, 255, 255, 255))
 
         # Save to memory
         output = BytesIO()
