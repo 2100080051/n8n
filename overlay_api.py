@@ -1,71 +1,52 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, send_file, jsonify
 from PIL import Image, ImageDraw, ImageFont
-from io import BytesIO
 import requests
+from io import BytesIO
 
 app = Flask(__name__)
 
 @app.route('/', methods=['POST'])
-def overlay_logo_and_text():
+def overlay_image():
     try:
         data = request.json
         image_url = data.get('image_url')
         logo_url = data.get('logo_url')
-        overlay_text = data.get('text')
+        text = data.get('text', '')
 
-        # Validate inputs
-        if not image_url or not logo_url or not overlay_text:
-            return jsonify({'error': 'Missing image_url, logo_url or text'}), 400
+        # Fetch image and logo
+        base_image = Image.open(BytesIO(requests.get(image_url).content)).convert("RGBA")
+        logo_image = Image.open(BytesIO(requests.get(logo_url).content)).convert("RGBA")
 
-        # Download main image
-        image_response = requests.get(image_url)
-        if not image_response.ok:
-            return jsonify({'error': 'Failed to download main image'}), 400
+        # Resize logo - make it larger
+        logo_width = int(base_image.width * 0.15)
+        logo_ratio = logo_width / logo_image.width
+        logo_height = int(logo_image.height * logo_ratio)
+        logo_image = logo_image.resize((logo_width, logo_height), Image.LANCZOS)
 
-        try:
-            base_image = Image.open(BytesIO(image_response.content)).convert("RGBA")
-        except Exception as e:
-            print("Failed to open base image")
-            print("Headers:", image_response.headers)
-            print("Content (first 200 bytes):", image_response.content[:200])
-            return jsonify({'error': 'Main image could not be processed'}), 500
+        # Paste logo at top-left corner
+        base_image.paste(logo_image, (20, 20), logo_image)
 
-        # Download logo
-        logo_response = requests.get(logo_url)
-        if not logo_response.ok:
-            return jsonify({'error': 'Failed to download logo image'}), 400
-
-        try:
-            logo_image = Image.open(BytesIO(logo_response.content)).convert("RGBA")
-        except Exception as e:
-            print("Failed to open logo image")
-            print("Headers:", logo_response.headers)
-            print("Content (first 200 bytes):", logo_response.content[:200])
-            return jsonify({'error': 'Logo image could not be processed'}), 500
-
-        # Resize logo
-        logo_size = (100, 100)
-        logo_image.thumbnail(logo_size)
-
-        # Paste logo (top-left corner)
-        base_image.paste(logo_image, (10, 10), logo_image)
-
-        # Add text (bottom-right)
+        # Add text at bottom-right corner
         draw = ImageDraw.Draw(base_image)
-        font = ImageFont.load_default()
-        text_position = (base_image.width - 10 - len(overlay_text)*6, base_image.height - 20)
-        draw.text(text_position, overlay_text, font=font, fill=(255, 255, 255, 255))
+        font_size = int(base_image.width * 0.04)
+        try:
+            font = ImageFont.truetype("arial.ttf", font_size)
+        except:
+            font = ImageFont.load_default()
+        
+        text_width, text_height = draw.textsize(text, font=font)
+        x = base_image.width - text_width - 30
+        y = base_image.height - text_height - 30
+        draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))  # White text
 
-        # Save to memory
+        # Output
         output = BytesIO()
         base_image.save(output, format='PNG')
         output.seek(0)
-
-        return app.response_class(output.getvalue(), mimetype='image/png')
+        return send_file(output, mimetype='image/png')
 
     except Exception as e:
-        print("Unexpected Error:", str(e))
-        return jsonify({'error': 'Server error', 'details': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=10000)
