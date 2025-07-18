@@ -1,66 +1,71 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, jsonify
 from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 import requests
-import io
-import os
-from zipfile import ZipFile
 
 app = Flask(__name__)
 
-# Load and resize logo once
-logo_url = "https://raw.githubusercontent.com/2100080051/logo/main/logo.png"
-logo_response = requests.get(logo_url)
-logo_img = Image.open(io.BytesIO(logo_response.content)).convert("RGBA")
-logo_img = logo_img.resize((100, 100))  # Larger size
+@app.route('/', methods=['POST'])
+def overlay_logo_and_text():
+    try:
+        data = request.json
+        image_url = data.get('image_url')
+        logo_url = data.get('logo_url')
+        overlay_text = data.get('text')
 
-# Font
-FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-TEXT = "Segura Invendors\nAI Agents & Automation"
+        # Validate inputs
+        if not image_url or not logo_url or not overlay_text:
+            return jsonify({'error': 'Missing image_url, logo_url or text'}), 400
 
-@app.route('/add-overlay', methods=['POST'])
-def add_overlay():
-    images_json = request.get_json()
-    image_files = []
+        # Download main image
+        image_response = requests.get(image_url)
+        if not image_response.ok:
+            return jsonify({'error': 'Failed to download main image'}), 400
 
-    for idx, entry in enumerate(images_json):
-        for item in entry['data']:
-            image_url = item['url']
-            try:
-                response = requests.get(image_url)
-                img = Image.open(io.BytesIO(response.content)).convert("RGBA")
-                
-                # Create transparent layer
-                overlay = Image.new("RGBA", img.size, (255, 255, 255, 0))
-                draw = ImageDraw.Draw(overlay)
+        try:
+            base_image = Image.open(BytesIO(image_response.content)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open base image")
+            print("Headers:", image_response.headers)
+            print("Content (first 200 bytes):", image_response.content[:200])
+            return jsonify({'error': 'Main image could not be processed'}), 500
 
-                # Paste logo
-                overlay.paste(logo_img, (20, 20), logo_img)
+        # Download logo
+        logo_response = requests.get(logo_url)
+        if not logo_response.ok:
+            return jsonify({'error': 'Failed to download logo image'}), 400
 
-                # Draw text
-                font_size = int(img.height * 0.035)
-                font = ImageFont.truetype(FONT_PATH, font_size)
-                text_position = (img.width - 450, img.height - 100)
-                draw.text(text_position, TEXT, font=font, fill=(255, 255, 255, 255))
+        try:
+            logo_image = Image.open(BytesIO(logo_response.content)).convert("RGBA")
+        except Exception as e:
+            print("Failed to open logo image")
+            print("Headers:", logo_response.headers)
+            print("Content (first 200 bytes):", logo_response.content[:200])
+            return jsonify({'error': 'Logo image could not be processed'}), 500
 
-                # Combine image and overlay
-                combined = Image.alpha_composite(img, overlay)
+        # Resize logo
+        logo_size = (100, 100)
+        logo_image.thumbnail(logo_size)
 
-                # Save to BytesIO
-                buf = io.BytesIO()
-                combined.save(buf, format="PNG")
-                buf.seek(0)
-                image_files.append((f"image_{idx+1}.png", buf))
-            except Exception as e:
-                print(f"Error processing image: {e}")
-    
-    # Package all into ZIP
-    zip_buffer = io.BytesIO()
-    with ZipFile(zip_buffer, 'w') as zip_file:
-        for filename, img_bytes in image_files:
-            zip_file.writestr(filename, img_bytes.read())
-    zip_buffer.seek(0)
+        # Paste logo (top-left corner)
+        base_image.paste(logo_image, (10, 10), logo_image)
 
-    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='branded_images.zip')
+        # Add text (bottom-right)
+        draw = ImageDraw.Draw(base_image)
+        font = ImageFont.load_default()
+        text_position = (base_image.width - 10 - len(overlay_text)*6, base_image.height - 20)
+        draw.text(text_position, overlay_text, font=font, fill=(255, 255, 255, 255))
+
+        # Save to memory
+        output = BytesIO()
+        base_image.save(output, format='PNG')
+        output.seek(0)
+
+        return app.response_class(output.getvalue(), mimetype='image/png')
+
+    except Exception as e:
+        print("Unexpected Error:", str(e))
+        return jsonify({'error': 'Server error', 'details': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=False, host='0.0.0.0', port=10000)
