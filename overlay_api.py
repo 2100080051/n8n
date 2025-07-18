@@ -1,45 +1,52 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, jsonify
 from PIL import Image, ImageDraw, ImageFont
 import requests
 from io import BytesIO
 
 app = Flask(__name__)
 
-@app.route('/overlay', methods=['POST'])
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"status": "Overlay API is live 🚀"}), 200
+
+@app.route("/overlay", methods=["POST"])
 def overlay():
-    base_url = request.json.get("base_url")
-    logo_url = request.json.get("logo_url")
-    text = request.json.get("text", "SeguraInvendors")
+    data = request.get_json()
 
-    # Load base image
-    base_response = requests.get(base_url)
-    base_img = Image.open(BytesIO(base_response.content)).convert("RGBA")
+    image_url = data.get("image_url")
+    logo_url = data.get("logo_url")
+    text = data.get("text", "")
 
-    # Load logo
-    logo_response = requests.get(logo_url)
-    logo_img = Image.open(BytesIO(logo_response.content)).convert("RGBA")
+    if not image_url or not logo_url:
+        return jsonify({"error": "Missing image_url or logo_url"}), 400
 
-    # Resize logo
-    logo_img = logo_img.resize((150, 150))
-
-    # Paste logo (bottom-right)
-    base_img.paste(logo_img, (base_img.width - 160, base_img.height - 160), logo_img)
-
-    # Add text
-    draw = ImageDraw.Draw(base_img)
     try:
-        font = ImageFont.truetype("arial.ttf", 36)
-    except:
+        # Download base image and logo
+        image_response = requests.get(image_url)
+        logo_response = requests.get(logo_url)
+
+        image = Image.open(BytesIO(image_response.content)).convert("RGBA")
+        logo = Image.open(BytesIO(logo_response.content)).convert("RGBA")
+
+        # Resize logo
+        logo = logo.resize((100, 100))
+
+        # Paste logo at bottom-right corner
+        image.paste(logo, (image.width - 110, image.height - 110), logo)
+
+        # Add white text at bottom-left
+        draw = ImageDraw.Draw(image)
         font = ImageFont.load_default()
-    draw.text((20, base_img.height - 60), text, fill="white", font=font)
+        draw.text((10, image.height - 30), text, fill="white", font=font)
 
-    # Save to buffer
-    output = BytesIO()
-    base_img.save(output, format="PNG")
-    output.seek(0)
+        # Output image
+        output = BytesIO()
+        image.save(output, format="PNG")
+        output.seek(0)
+        return send_file(output, mimetype="image/png")
 
-    return send_file(output, mimetype='image/png')
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=10000)
-
+if __name__ == "__main__":
+    app.run(debug=False)
