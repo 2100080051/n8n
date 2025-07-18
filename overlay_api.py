@@ -11,7 +11,7 @@ def index():
     return "Flask image overlay API is running. Use POST with image_url, logo_url, and text."
 
 # Handle POST request to overlay logo and text
-@app.route('/overlay', methods=['POST'])
+@app.route('/', methods=['POST'])
 def overlay_logo_and_text():
     try:
         data = request.json
